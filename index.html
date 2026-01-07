@@ -1,0 +1,135 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Planner</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<style>
+body{margin:0;background:#0f172a;color:#e5e7eb;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+header{text-align:center;padding:14px;font-weight:700}
+input,button{background:#111827;color:#e5e7eb;border:1px solid #1f2937;border-radius:10px;padding:10px}
+.container{padding:10px}
+nav{display:flex;gap:6px;overflow:auto}
+nav button{font-size:13px}
+.task{background:#111827;padding:10px;border-radius:10px;margin-bottom:8px;display:flex;justify-content:space-between}
+.done{text-decoration:line-through;opacity:.6}
+.small{font-size:12px;color:#9ca3af}
+.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.cell{background:#111827;border-radius:10px;padding:6px;font-size:12px;min-height:80px}
+.week{display:flex;flex-direction:column;gap:6px}
+</style>
+</head>
+<body>
+<header>🧠 Planner</header>
+<div class="container">
+<input id="input" placeholder="Remind me after five minutes to buy groceries every Monday">
+<nav>
+<button onclick="view='calendar';render()">Calendar</button>
+<button onclick="view='week';render()">Week</button>
+<button onclick="view='today';render()">Today</button>
+<button onclick="view='journal';render()">Journal</button>
+</nav>
+<div id="content"></div>
+</div>
+
+<script>
+if("serviceWorker"in navigator)navigator.serviceWorker.register("sw.js");
+if("Notification"in window)Notification.requestPermission();
+
+let tasks=JSON.parse(localStorage.tasks||"[]");
+let journal=JSON.parse(localStorage.journal||"{}");
+let view="calendar";
+
+document.getElementById("input").addEventListener("keydown",e=>{
+ if(e.key==="Enter")addTask(e.target.value);
+});
+
+function addTask(text){
+ if(!text)return;
+ let repeat=null;
+ if(/every monday/i.test(text))repeat="monday";
+ if(/every day/i.test(text))repeat="daily";
+ let delay=5*60000;
+ let m=text.match(/after (\w+) minutes/i);
+ if(m){
+  let n=parseInt(m[1])||5;
+  delay=n*60000;
+ }
+ let due=Date.now()+delay;
+ let task={id:Date.now(),text,done:false,due,repeat};
+ tasks.push(task);
+ schedule(task);
+ log("Added: "+text);
+ save();render();
+ document.getElementById("input").value="";
+}
+
+function schedule(task){
+ setTimeout(()=>notify(task),Math.max(0,task.due-Date.now()));
+}
+
+function notify(task){
+ if(Notification.permission==="granted"){
+  new Notification("Reminder",{body:task.text,actions:[
+   {action:"snooze10",title:"Snooze 10m"},
+   {action:"done",title:"Done"}
+  ]});
+ }
+}
+
+function render(){
+ let el=document.getElementById("content");el.innerHTML="";
+ if(view==="week")return renderWeek(el);
+ if(view==="journal")return renderJournal(el);
+ renderCalendar(el);
+}
+
+function renderCalendar(el){
+ let d=new Date();d.setDate(1);
+ let days=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();
+ let grid=document.createElement("div");grid.className="calendar";
+ for(let i=1;i<=days;i++){
+  let c=document.createElement("div");c.className="cell";
+  c.innerHTML="<b>"+i+"</b>";
+  tasks.filter(t=>new Date(t.due).getDate()===i&&!t.done)
+   .forEach(t=>c.innerHTML+="<div>"+t.text+"</div>");
+  grid.appendChild(c);
+ }
+ el.appendChild(grid);
+}
+
+function renderWeek(el){
+ let now=new Date();
+ let week=document.createElement("div");week.className="week";
+ for(let i=0;i<7;i++){
+  let d=new Date();d.setDate(now.getDate()+i);
+  let div=document.createElement("div");div.className="task";
+  div.innerHTML="<div>"+d.toDateString()+"</div>";
+  week.appendChild(div);
+ }
+ el.appendChild(week);
+}
+
+function renderJournal(el){
+ for(let d in journal){
+  el.innerHTML+="<b>"+d+"</b><pre>"+journal[d].join("\n")+"</pre>";
+ }
+}
+
+function log(t){
+ let d=new Date().toISOString().slice(0,10);
+ journal[d]=journal[d]||[];
+ journal[d].push(t);
+}
+
+function save(){
+ localStorage.tasks=JSON.stringify(tasks);
+ localStorage.journal=JSON.stringify(journal);
+}
+render();
+</script>
+</body>
+</html>
