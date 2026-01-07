@@ -1,0 +1,253 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planner</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b0f1a">
+
+<style>
+:root{
+  --bg:#0b0f1a;
+  --panel:#12172a;
+  --card:#161c33;
+  --text:#e9ecff;
+  --muted:#9aa3d9;
+  --accent:#6c8cff;
+  --green:#3ddc97;
+  --red:#ff6b6b;
+  --radius:16px;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+header{
+  padding:14px;
+  text-align:center;
+  font-weight:700;
+  letter-spacing:.3px;
+}
+.container{
+  max-width:720px;
+  margin:auto;
+  padding:12px;
+}
+.input-wrap{
+  background:var(--panel);
+  padding:12px;
+  border-radius:var(--radius);
+  margin-bottom:12px;
+}
+#input{
+  width:100%;
+  font-size:18px;
+  padding:14px;
+  border-radius:12px;
+  border:none;
+  outline:none;
+  background:var(--card);
+  color:var(--text);
+}
+nav{
+  display:flex;
+  gap:8px;
+  overflow:auto;
+  margin-bottom:10px;
+}
+nav button{
+  background:transparent;
+  color:var(--muted);
+  border:1px solid #232a4d;
+  padding:8px 14px;
+  border-radius:999px;
+  font-size:13px;
+}
+nav button.active{
+  background:var(--accent);
+  color:#fff;
+}
+.calendar{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:8px;
+}
+.day{
+  background:var(--panel);
+  border-radius:14px;
+  padding:8px;
+  min-height:90px;
+  font-size:12px;
+}
+.day b{
+  color:var(--muted);
+}
+.task{
+  background:var(--card);
+  margin-top:6px;
+  padding:6px 8px;
+  border-radius:8px;
+  font-size:11px;
+}
+.list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.row{
+  background:var(--panel);
+  border-radius:14px;
+  padding:12px;
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+}
+.row.done{
+  opacity:.6;
+  text-decoration:line-through;
+}
+.small{font-size:12px;color:var(--muted)}
+</style>
+</head>
+
+<body>
+<header>Planner</header>
+<div class="container">
+
+<div class="input-wrap">
+  <input id="input" placeholder="Remind me after 10 minutes to buy groceries tomorrow">
+</div>
+
+<nav>
+  <button class="active" onclick="setView('calendar')">Calendar</button>
+  <button onclick="setView('today')">Today</button>
+  <button onclick="setView('upcoming')">Upcoming</button>
+</nav>
+
+<div id="content"></div>
+</div>
+
+<script>
+if("serviceWorker"in navigator) navigator.serviceWorker.register("sw.js");
+if("Notification"in window) Notification.requestPermission();
+
+let tasks = JSON.parse(localStorage.tasks||"[]");
+let view = "calendar";
+
+document.getElementById("input").addEventListener("keydown",e=>{
+ if(e.key==="Enter") addTask(e.target.value);
+});
+
+function addTask(text){
+ if(!text.trim())return;
+ const parsed = parse(text);
+ tasks.push(parsed);
+ schedule(parsed);
+ save(); render();
+ document.getElementById("input").value="";
+}
+
+function parse(text){
+ let now = new Date();
+ let due = new Date(now);
+ let reminder = null;
+
+ // tomorrow
+ if(/tomorrow/i.test(text)) due.setDate(due.getDate()+1);
+
+ // after X minutes
+ let m = text.match(/after (\d+) minutes?/i);
+ if(m){
+   reminder = Date.now() + parseInt(m[1])*60000;
+   due = new Date(reminder);
+ }
+
+ // auto tags
+ let tags=[];
+ if(/buy|shop|grocery/i.test(text)) tags.push("shopping");
+ if(/pay|bill/i.test(text)) tags.push("finance");
+ if(/meet|call/i.test(text)) tags.push("personal");
+
+ return {
+   id:Date.now(),
+   text,
+   due:due.toISOString(),
+   reminder,
+   tags,
+   done:false
+ };
+}
+
+function schedule(task){
+ if(task.reminder && Notification.permission==="granted"){
+   setTimeout(()=>{
+     new Notification("Reminder",{body:task.text});
+   },Math.max(0,task.reminder-Date.now()));
+ }
+}
+
+function render(){
+ document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active"));
+ document.querySelector(`nav button[onclick="setView('${view}')"]`).classList.add("active");
+ const el=document.getElementById("content");
+ el.innerHTML="";
+ if(view==="calendar") return renderCalendar(el);
+ renderList(el);
+}
+
+function renderCalendar(el){
+ let d=new Date(); d.setDate(1);
+ let days=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();
+ let grid=document.createElement("div"); grid.className="calendar";
+ for(let i=1;i<=days;i++){
+  let cell=document.createElement("div"); cell.className="day";
+  cell.innerHTML="<b>"+i+"</b>";
+  tasks.filter(t=>new Date(t.due).getDate()===i && new Date(t.due).getMonth()===d.getMonth())
+    .forEach(t=>cell.innerHTML+=`<div class="task">${t.text}</div>`);
+  grid.appendChild(cell);
+ }
+ el.appendChild(grid);
+}
+
+function renderList(el){
+ let now=new Date();
+ let list=document.createElement("div"); list.className="list";
+ tasks.filter(t=>{
+   let dt=new Date(t.due);
+   if(view==="today") return dt.toDateString()===now.toDateString();
+   if(view==="upcoming") return dt>now;
+ }).forEach(t=>{
+   let r=document.createElement("div");
+   r.className="row"+(t.done?" done":"");
+   r.innerHTML=`<div>
+     <div>${t.text}</div>
+     <div class="small">${new Date(t.due).toLocaleString()} • ${t.tags.join(", ")}</div>
+   </div>
+   <button onclick="toggle(${t.id})">✓</button>`;
+   list.appendChild(r);
+ });
+ el.appendChild(list);
+}
+
+function toggle(id){
+ let t=tasks.find(x=>x.id===id);
+ t.done=!t.done;
+ save(); render();
+}
+
+function save(){
+ localStorage.tasks=JSON.stringify(tasks);
+}
+
+function setView(v){view=v; render();}
+
+render();
+</script>
+</body>
+</html>
